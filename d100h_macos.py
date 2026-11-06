@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""macOS D100H discovery, BLE listener, and experimental vendor HID access.
+"""macOS D100H discovery, BLE listener, and USB vendor HID access.
 
 Install: python3 -m pip install -r requirements-macos.txt
 Inspect: python3 d100h_macos.py usb
@@ -7,10 +7,13 @@ Inspect: python3 d100h_macos.py usb
          python3 d100h_macos.py probe-hid --path PATH_HEX
 Listen:  python3 d100h_macos.py scan
          python3 d100h_macos.py ble [DEVICE-UUID] [--map mappings.macos.example.json]
+USB:     python3 d100h_macos.py hid --path PATH_HEX --report-id 0 --size 64
 
 Quit Ulanzi Studio before listening. For BLE, disconnect USB and allow Bluetooth
 access for your terminal in System Settings > Privacy & Security > Bluetooth.
-The experimental hid command requires report ID and size from your descriptor.
+Wired FFF1:00DE is user-confirmed on vendor page FFFE with report ID 0 and
+64-byte payloads. Check descriptors on other revisions. Sleep operations await
+live validation.
 """
 import argparse
 import asyncio
@@ -86,7 +89,8 @@ def probe_hid(args):
         print(json.dumps({'reports_received': count, 'probe_complete': True}), flush=True)
         if not count:
             print('No reports received on this path. This does not establish a hardware fault; '
-                  'another HID collection may carry the controls. Check Input Monitoring '
+                  'vendor collections may require the active hid listener heartbeat, or another '
+                  'HID collection may carry the controls. Check Input Monitoring '
                   'permission for your terminal if opening or reading is blocked.', file=sys.stderr)
     finally:
         device.close()
@@ -122,7 +126,7 @@ async def run_bluetooth(args, dispatch):
 
 
 def run_hid(args, dispatch):
-    """HIDAPI supplies macOS IOHIDManager transport; device framing is unverified."""
+    """HIDAPI transport; FFF1:00DE USB framing is user-confirmed at ID 0/64 bytes."""
     import hid
     if not 0 <= args.report_id <= 255 or not 20 <= args.size <= 64:
         raise ValueError('Report ID must be 0..255; payload size must be 20..64')
@@ -177,7 +181,7 @@ def build_parser():
     ble = sub.add_parser('ble', help='Listen via BLE; omit UUID to discover a single dial')
     ble.add_argument('address', nargs='?', help='macOS Bluetooth UUID, not a MAC address')
     ble.add_argument('--timeout', type=float, default=15, help='Discovery seconds')
-    wired = sub.add_parser('hid', help='Experimental vendor HID listener')
+    wired = sub.add_parser('hid', help='Vendor HID listener; wired FFF1:00DE uses report ID 0 and size 64')
     wired.add_argument('--path', required=True, help='Exact path_hex value from list-hid')
     wired.add_argument('--report-id', required=True, type=lambda s: int(s, 0))
     wired.add_argument('--size', required=True, type=int, help='Payload size excluding report ID')

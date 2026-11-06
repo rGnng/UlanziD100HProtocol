@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import io
 import json
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
@@ -11,11 +12,36 @@ from unittest.mock import AsyncMock, Mock, patch
 import d100h_macos as mac
 from d100h import Dispatcher, crypt
 
+WIRED_USB = json.loads((Path(__file__).parent / 'tests/fixtures/d100h_wired_usb.json').read_text())
+
 
 class MacTests(unittest.TestCase):
+    def test_confirmed_wired_unnumbered_transport(self):
+        path = b'DevSrvsID:test-wired-device'
+        info = dict(WIRED_USB, path=path)
+        dev = Mock()
+        # Assemble a 64-byte regression packet from independently captured
+        # top-middle ciphertext and encrypted zero blocks. Not a raw USB capture.
+        wire = bytes.fromhex('22d73cfa751ffbc7') + bytes.fromhex('3890c499a360aaad') * 7
+        dev.read.side_effect = [list(wire), KeyboardInterrupt()]
+        dev.write.side_effect = lambda packet: len(packet)
+        hid = SimpleNamespace(enumerate=lambda: [info], device=lambda: dev)
+        out = io.StringIO()
+        dispatch = Dispatcher()
+        with patch.dict('sys.modules', {'hid': hid}), contextlib.redirect_stdout(out):
+            with self.assertRaises(KeyboardInterrupt):
+                mac.run_hid(argparse.Namespace(path=path.hex(), report_id=WIRED_USB['report_id'],
+                                              size=WIRED_USB['output_payload_bytes']), dispatch)
+        self.assertEqual(json.loads(out.getvalue())['event'], 'top_middle.down')
+        # HIDAPI uses a zero report-ID prefix on writes; unnumbered input has none.
+        expected_write = b'\0' + bytes.fromhex('24569ef228e145a1') + bytes.fromhex('3890c499a360aaad') * 7
+        self.assertEqual(dev.write.call_args.args[0], expected_write)
+        dev.close.assert_called_once()
+        self.assertFalse(dispatch.held)
+
     def test_probe_registry_id_opens_vendor_device_missing_from_enumeration(self):
         dev = Mock()
-        dev.get_report_descriptor.return_value = [0x06, 0xfe, 0xff]
+        dev.get_report_descriptor.return_value = list(bytes.fromhex(WIRED_USB['report_descriptor_hex']))
         hid = SimpleNamespace(enumerate=lambda: [], device=lambda: dev)
         args = mac.build_parser().parse_args(['probe-hid', '--registry-id', '0x10002aadd'])
         out = io.StringIO()

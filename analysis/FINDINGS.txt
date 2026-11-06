@@ -47,8 +47,8 @@ for the relevant segments in this exact library:
       VID 05AC / PID 0267 / usage page FFFC
       VID FFF1 / PID 00D2 / usage page FFFE
       VID FFF1 / PID 00E9 / usage page FFFE
-    These prove library support only. Do not assign one to the user's wired
-    D100H revision without inspecting the physical unit.
+    These initially proved library support only. Subsequent user testing
+    identifies the wired unit as FFF1:00DE / FFFE; see section 5.
 
 Disassembly and short strings are saved alongside this file. disassemble.py
 requires macholib and capstone (installed in analysis/venv). It uses symbols in the
@@ -94,8 +94,8 @@ The observed event prefix is 8B 10 ID STATE. Physical button state is 01 down,
 Rotation events have state 01, one per reported step, no absolute angle/count.
 Keep a pressed-button set to support side-button + rotation combinations.
 Do not infer physical knob hold duration from ID 07; held rotation uses 0B/0C.
-These mappings are capture-backed for the tested BLE firmware and need a quick
-physical check on the user's newer wired hardware/firmware revision.
+These mappings originate in the tested BLE firmware. Subsequent wired event
+logs confirm the subset described in section 5.
 
 4. Delivered implementation and checks
 
@@ -107,12 +107,64 @@ probe/listener, JSON command dispatch. No configured commands run by default.
 ../test_protocol.py: captured plaintext/ciphertext fixtures, independent HID
 ciphertext prefixes, modifier state and one-shot knob-click handling.
 
-Validation: three Python tests passed; C++11 decoder compiled with
+Initial validation: three Python tests passed; C++11 decoder compiled with
 -Wall -Wextra -Werror and decoded captured event/heartbeat vectors successfully.
-CLI help and empty-device enumeration passed. No live USB/BLE or ESP32 testing.
+CLI help and empty-device enumeration passed. At that point there had been no
+live USB/BLE or ESP32 testing. Subsequent user USB confirmation is in section 5.
 The Linux HID transport requires the actual report ID and payload size. It is
 experimental; it encrypts the whole selected payload as the supplied driver does.
 The ESP32 deliverable is a codec/integration guide, not complete board firmware.
 For USB on ESP32, use a USB host-capable chip/board (e.g. S3), host stack, and a
-proper 5V VBUS supply; descriptors and actual wired reports must first be captured.
+proper 5V VBUS supply. The user has since provided the wired descriptor and
+decoded event logs; an ESP32 host implementation remains untested.
 The BLE route avoids these USB-specific hardware and framing requirements.
+
+
+5. User-confirmed wired USB on macOS
+
+The user supplied hidutil output, the vendor report descriptor, decoded event
+logs from this project's active macOS HID listener, and confirmation that the
+macOS example mappings work. These are user-run results, not local hardware
+access by the analysis agent. Firmware and macOS versions were not supplied.
+
+  VID/PID: FFF1:00DE
+  Vendor usage page: FFFE (decimal 65534), usage 1
+  Report ID: none (pass 0 to the scripts/HIDAPI)
+  Input payload: 64 bytes
+  Output payload: 64 bytes
+  Descriptor:
+    06feff0901a1010902150026ff007508954081020903150026ff00750895409102c0
+
+HIDAPI writes use a zero prefix followed by 64 encrypted payload bytes. This
+zero is an API convention, not a Report ID declared by the USB descriptor.
+Unnumbered reads contain the 64-byte payload without a report-ID prefix.
+The full heartbeat plaintext is padded to 64 bytes before TEA encryption; all
+eight blocks are encrypted. Do not pad a 20-byte BLE ciphertext with zeros.
+
+The vendor interface was visible in hidutil's Devices section. The separate
+mouse interface (page 0001) produced five-byte all-zero reports and was the
+wrong interface for vendor events. A read-only probe on FFFE was silent. The
+active HID listener's heartbeat enabled decoded button/knob events.
+
+Observed IDs in the supplied log:
+  02: top-middle down/up
+  04/05: upper-left/right down/up
+  06/08: lower-left/right down/up
+  07: knob click
+  09/0A: free counterclockwise/clockwise rotation
+  0B/0C: counterclockwise/clockwise rotation with knob held
+Top-left (01) and top-right (03) were not included in that event log. The user
+subsequently reported mapped actions working without supplying a per-action log.
+Sleep read/write, actual idle timing, and setting persistence were not verified
+by this wired test. Linux USB and ESP32 transports still need live testing.
+
+The descriptor and evidence summary are saved in:
+  ../tests/fixtures/d100h_wired_usb.json
+Registry IDs and path_hex values depend on the connection session; always
+select the current FFFE vendor interface after reconnecting.
+
+Updated software verification: 15 Python tests, including an unnumbered 64-byte
+HID regression test assembled from independent ciphertext blocks (not represented
+as a captured raw USB report). Numbered HID and sleep acknowledgment tests remain.
+The supplied C++ decoder handles BLE's 20-byte framing; it must be adapted for
+64-byte USB framing before use in a USB host implementation.

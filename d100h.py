@@ -3,14 +3,15 @@
 
 BLE: python d100h.py ble AA:BB:CC:DD:EE:FF [--map mappings.json]
 HID: python d100h.py list-hid
-     python d100h.py hid /dev/hidrawN --report-id 0xfb --size 64
+     python d100h.py hid /dev/hidrawN --report-id 0 --size 64
 
 Close Ulanzi Studio first. BLE requires `pip install bleak`; hidraw and codec
 use only Python's standard library. USB report ID/size must match the descriptor.
 Mappings are JSON objects from event names to command argument arrays, e.g.
 {"top_left.down": ["playerctl", "play-pause"]}. No shell is used.
 Protocol sources: kriomant/ulanzi-d100h (MIT), ftl/hamdial (MIT), and static
-analysis of Ulanzi Studio 3.4.8. No hardware validation of this client performed.
+analysis of Ulanzi Studio 3.4.8. Wired FFF1:00DE was confirmed using the macOS
+helper at report ID 0/64 bytes; this Linux transport still needs live validation.
 """
 import argparse
 import asyncio

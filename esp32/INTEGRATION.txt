@@ -51,4 +51,23 @@ measure how long the knob was physically held. Turning while pressed uses 0b/0c;
 physical side/top buttons still have their own independent transitions.
 
 This is integration guidance and a tested portable codec, not a complete flashed
-firmware project. Fresh pairing and the dual-mode revision still need validation.
+firmware project. ESP32 pairing and BLE operation still need live validation.
+
+Wired USB alternative (not implemented in the ESP32 example)
+
+A user confirmed wired D100H FFF1:00DE on macOS: vendor usage page FFFE,
+usage 1, unnumbered 64-byte Input and Output reports. The read-only probe was
+silent; the active listener's encrypted heartbeat enabled control events.
+The descriptor is recorded in tests/fixtures/d100h_wired_usb.json.
+
+For an ESP32 USB implementation, use a USB host-capable board (e.g. S3), a host
+stack, and proper 5V VBUS power. Select the vendor interface, send a full encrypted
+64-byte heartbeat every second and read 64-byte reports. There is no on-wire
+report ID; the leading zero required by desktop HIDAPI is an API convention.
+The supplied d100h::heartbeat is the BLE-specific 20-byte value. Do not zero-pad
+its ciphertext for USB: pad the heartbeat plaintext to 64 bytes, then encrypt all
+eight blocks. The decode function also expects BLE's 20-byte framing; adapt it
+to decrypt the complete 64-byte USB message before parsing its event prefix.
+Do not pass only the first 20 encrypted USB bytes into the BLE decoder, which
+leaves its last four bytes unchanged. No ESP32 USB host firmware is supplied or
+validated by the macOS confirmation.

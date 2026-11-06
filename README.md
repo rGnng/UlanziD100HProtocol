@@ -14,11 +14,17 @@ package checksum, binary offsets, sources, and limitations.
   event codes.
 - Python event dispatch tested, including held buttons and one-shot knob clicks.
 - C++11 decoder compiled and checked against captured packets on a Linux host.
-- No live D100H or ESP32 validation performed here.
+- **macOS wired USB confirmed by a user on D100H `FFF1:00DE`**, including
+  button events, knob clicks, free/held rotation, and example command mappings.
+- Linux USB, this project's BLE listener, ESP32 integration, and sleep-timer
+  operations have not received live validation in this project.
 - BLE mappings were captured by the referenced project on firmware **1.3.8.1**.
   Verify them on other revisions.
-- Wired USB support is experimental: inspect the actual HID descriptor first.
-  USB report IDs, sizes, and identity must not be inferred from Bluetooth IDs.
+- Confirmed wired framing: vendor page `0xFFFE`, **report ID `0`**, **64-byte
+  input/output payloads**. Other revisions still need descriptor checks.
+- See [wired USB evidence](tests/fixtures/d100h_wired_usb.json). The supplied event
+  log covers IDs `02`, `04`–`0C`; top-left/right were not separately logged.
+  Firmware and macOS versions were not supplied.
 
 ## Linux BLE listener
 
@@ -63,6 +69,30 @@ python3 d100h_macos.py list-hid
 
 `list-hid` prints one JSON record per interface, including vendor/product IDs,
 usage page, and an exact `path_hex` selection value. It does not send commands.
+
+For the confirmed **wired D100H (`FFF1:00DE`)**, keep USB connected and quit
+Ulanzi Studio. Select the entry with `usage_page: "0xfffe"` from `list-hid`,
+then copy its current `path_hex`:
+
+```sh
+D100H_PATH=PASTE_VENDOR_PATH_HEX_HERE
+
+# Print decoded button/knob events.
+python3 d100h_macos.py hid --path "$D100H_PATH" --report-id 0 --size 64
+```
+
+Stop with Ctrl-C, then enable the macOS example actions:
+
+```sh
+python3 d100h_macos.py hid --path "$D100H_PATH" --report-id 0 --size 64 \
+  --map mappings.macos.example.json
+```
+
+The user confirmed the listener and mapped actions work. The standard mouse
+collection on page `0x0001` is a different interface; its five-byte zero reports
+do not contain vendor control events. Use the **Devices** section of
+`hidutil list` to locate page `65534` (`0xFFFE`) if necessary. Paths and registry
+IDs change after reconnecting; examples are not permanent device identifiers.
 
 For Bluetooth, pair in macOS settings, quit Ulanzi Studio, unplug USB from the
 computer, and allow Bluetooth access for Terminal or your IDE when prompted.
@@ -115,25 +145,23 @@ multiple collections sharing a path. It sends no heartbeat, output reports, or
 feature writes, so factory actions may still occur. Raw input does not by itself
 provide the vendor-mode control mapping.
 
-A zero-report result does not prove a hardware fault: the selected collection may
+A zero-report result does not prove a hardware fault. The confirmed vendor
+interface was silent during the read-only probe and began reporting controls
+when the active `hid` listener sent heartbeats. A mouse collection may also
 not carry those controls. If access fails, check **Privacy & Security → Input
 Monitoring** for your terminal. For a descriptor error, try upgrading `hidapi` or
 capture `ioreg -r -c IOHIDDevice -l -w 0`. Paths may change after reconnecting the
 USB cable; enumerate again if the path is no longer found. Share the descriptor
 and raw reports to determine the vendor report ID and size for your revision.
 
-The helper also offers experimental HIDAPI access for the wired model. After
-confirming the vendor interface and its report descriptor, use:
+Only vendor usage pages `0xFFFC` and `0xFFFE` are accepted by the active listener.
+The confirmed USB descriptor has 64-byte Input and Output reports, with **no
+Report ID item**. HIDAPI writes therefore use a leading zero plus the encrypted
+64-byte payload; reads contain only the 64-byte payload. This differs from the
+Bluetooth HID report `0xFB` used by another implementation.
 
-```sh
-# Example report values only; verify for your hardware first.
-python3 d100h_macos.py hid --path PATH_HEX_FROM_LIST_HID --report-id 0xfb --size 64
-```
-
-Only vendor usage pages `0xFFFC` and `0xFFFE` are accepted. Enumeration does not
-supply a report size; obtain that from the descriptor or a capture before writing.
-This transport and the macOS helper have been tested with mocked I/O on Linux,
-not on a live Mac/D100H. The helper does not automatically reconnect.
+For other revisions, obtain the descriptor before selecting report sizes and IDs.
+The helper does not automatically reconnect.
 
 ## Map controls to commands
 
@@ -200,8 +228,17 @@ python3 d100h.py ble AA:BB:CC:DD:EE:FF --read-sleep
 python3 d100h.py ble AA:BB:CC:DD:EE:FF --sleep 7200
 ```
 
-The same flags work with each script's experimental `hid` mode; keep its required
-path, report ID and payload size arguments. They can also be combined with `--map`.
+For the confirmed wired model's configuration, these are the sleep commands
+(**sleep read/write is still awaiting live verification**):
+
+```sh
+python3 d100h_macos.py hid --path "$D100H_PATH" --report-id 0 --size 64 --read-sleep
+python3 d100h_macos.py hid --path "$D100H_PATH" --report-id 0 --size 64 --sleep 7200
+python3 d100h_macos.py hid --path "$D100H_PATH" --report-id 0 --size 64 --sleep off
+```
+
+The same flags work with the Linux `hid` mode; keep its required path, report ID
+and payload size arguments. They can also be combined with `--map`.
 Quit Ulanzi Studio before changing the device settings.
 
 Values are whole seconds from **0 to 65535**. `0`/`off` disables the timer; Studio's
@@ -218,7 +255,9 @@ A reply prints, for example:
 has `false`. A missing acknowledgment after five seconds or a reply with a
 different value is reported as an error. A successful write alone is not treated
 as confirmation. Settings retention after a power cycle was independently observed
-on firmware 1.3.8.1; this implementation has not been tested against live hardware.
+on firmware 1.3.8.1 by the independent BLE capture project. Sleep operations in
+these scripts are fixture-tested; they were not part of the user's wired
+validation.
 The accepted duration does not establish the exact conditions for entering sleep.
 
 ## BLE framing
@@ -255,13 +294,14 @@ After confirming the vendor interface, report ID, payload size, and access
 permissions, use:
 
 ```sh
-# Example values only; verify against your actual descriptor.
-python3 d100h.py hid /dev/hidrawN --report-id 0xfb --size 64
+# Values confirmed on macOS for wired FFF1:00DE; Linux live testing is pending.
+python3 d100h.py hid /dev/hidrawN --report-id 0 --size 64
 ```
 
 `--size` excludes the report ID. The HID transport encrypts the selected payload
 as the supplied driver does. The independently documented Bluetooth HID identity
-`FFF1:0082` and report `FB` do not establish your wired revision's USB identity.
+`FFF1:0082` and report `FB` belong to the Bluetooth HID route. The user-confirmed
+wired device is `FFF1:00DE`, page `FFFE`, unnumbered 64-byte reports.
 
 ## ESP32
 
