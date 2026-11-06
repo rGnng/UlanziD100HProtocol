@@ -50,14 +50,21 @@ def list_hid():
 def probe_hid(args):
     """Read descriptor and input reports without vendor writes or heartbeat."""
     import hid
-    path = bytes.fromhex(args.path)
+    registry_id = getattr(args, 'registry_id', None)
+    if registry_id is not None:
+        if not 0 < registry_id < 2**64:
+            raise ValueError('Registry ID must be a positive uint64 from hidutil list Devices')
+        path = f'DevSrvsID:{registry_id}'.encode('ascii')
+    else:
+        path = bytes.fromhex(args.path)
     matches = [device for device in hid.enumerate() if device['path'] == path]
-    if not matches:
+    if not matches and registry_id is None:
         raise ValueError('HID path is no longer present; run list-hid again')
     device = hid.device()
     try:
         device.open_path(path)
         print(json.dumps({'probe': 'read-only', 'path_hex': path.hex(),
+                          'enumerated': bool(matches),
                           'collections': [{'usage_page': item.get('usage_page'),
                                            'usage': item.get('usage')} for item in matches]}), flush=True)
         try:
@@ -160,7 +167,10 @@ def build_parser():
     sub.add_parser('usb', help='List USB devices using macOS system_profiler')
     sub.add_parser('list-hid', help='List HID interfaces and their path_hex values')
     probe = sub.add_parser('probe-hid', help='Read-only HID descriptor and raw input test')
-    probe.add_argument('--path', required=True, help='Exact path_hex value from list-hid')
+    probe_target = probe.add_mutually_exclusive_group(required=True)
+    probe_target.add_argument('--path', help='Exact path_hex value from list-hid')
+    probe_target.add_argument('--registry-id', type=lambda s: int(s, 0),
+                              help='Device RegistryID from hidutil list, e.g. 0x10002aadd; opens directly')
     probe.add_argument('--seconds', type=float, default=30, help='Capture duration, default 30 seconds')
     scanner = sub.add_parser('scan', help='Print nearby BLE device UUIDs and names')
     scanner.add_argument('--timeout', type=float, default=15)

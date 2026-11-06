@@ -13,6 +13,22 @@ from d100h import Dispatcher, crypt
 
 
 class MacTests(unittest.TestCase):
+    def test_probe_registry_id_opens_vendor_device_missing_from_enumeration(self):
+        dev = Mock()
+        dev.get_report_descriptor.return_value = [0x06, 0xfe, 0xff]
+        hid = SimpleNamespace(enumerate=lambda: [], device=lambda: dev)
+        args = mac.build_parser().parse_args(['probe-hid', '--registry-id', '0x10002aadd'])
+        out = io.StringIO()
+        with patch.dict('sys.modules', {'hid': hid}), \
+             patch.object(mac.time, 'monotonic', side_effect=[0, 31]), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            mac.probe_hid(args)
+        dev.open_path.assert_called_once_with(b'DevSrvsID:4295142109')
+        self.assertFalse(json.loads(out.getvalue().splitlines()[0])['enumerated'])
+        self.assertIn('06feff', out.getvalue())
+        dev.write.assert_not_called()
+        dev.close.assert_called_once()
+
     def test_read_only_probe_handles_duplicate_mouse_collections(self):
         path = b'DevSrvsID:4295142103'
         info = [{'path': path, 'usage_page': 1, 'usage': usage} for usage in (2, 1)]

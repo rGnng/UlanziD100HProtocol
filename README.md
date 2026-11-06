@@ -94,6 +94,19 @@ quit Ulanzi Studio, and choose the current `path_hex` from `list-hid`:
 python3 d100h_macos.py probe-hid --path YOUR_PATH_HEX --seconds 30
 ```
 
+If `hidutil list` shows the vendor device (usage page `65534` = `0xFFFE`) but
+HIDAPI does not enumerate it, select its **Devices** registry ID directly:
+
+```sh
+# Example ID; use the current RegistryID from your Mac's Devices section.
+python3 d100h_macos.py probe-hid --registry-id 0x10002aadd --seconds 30
+```
+
+This resolves HIDAPI's `DevSrvsID:<decimal registry ID>` path and attempts a
+read-only open even when enumeration omits it. A failed open still requires
+checking permissions or ownership by another application. Registry IDs change
+when devices reconnect; do not use a Services section ID in their place.
+
 During capture, press and release each button, click the knob, rotate both ways,
 and rotate while holding the knob. The probe prints the report descriptor when
 available and timestamped raw input reports, preserving any report ID. It accepts
