@@ -1,0 +1,27 @@
+{
+  "top_left.down": [
+    "open",
+    "-a",
+    "Calculator"
+  ],
+  "top_middle.down": [
+    "open",
+    "-a",
+    "Music"
+  ],
+  "knob.click": [
+    "osascript",
+    "-e",
+    "set isMuted to output muted of (get volume settings)\nset volume output muted (not isMuted)"
+  ],
+  "rotate.cw": [
+    "osascript",
+    "-e",
+    "set level to (output volume of (get volume settings)) + 2\nif level > 100 then set level to 100\nset volume output volume level"
+  ],
+  "rotate.ccw": [
+    "osascript",
+    "-e",
+    "set level to (output volume of (get volume settings)) - 2\nif level < 0 then set level to 0\nset volume output volume level"
+  ]
+}

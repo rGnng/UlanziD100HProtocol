@@ -1,6 +1,6 @@
 # Ulanzi D100H Protocol
 
-Unofficial D100H protocol notes, a Linux event listener with command mappings, and
+Unofficial D100H protocol notes, Linux/macOS event listeners with command mappings, and
 a portable C++ decoder for ESP32 integration.
 
 The supplied Ulanzi Studio 3.4.8 macOS package was statically inspected without
@@ -43,6 +43,62 @@ then one per second, and prints JSON events. On the independently tested firmwar
 heartbeats enable vendor events and suppress factory keyboard/media actions.
 Standalone behavior resumes approximately three seconds after heartbeats stop.
 The listener does not automatically reconnect.
+
+## macOS helper
+
+Install the macOS dependencies in a virtual environment:
+
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r requirements-macos.txt
+```
+
+Inspect USB and HID devices (the equivalents of Linux `lsusb` and `list-hid`):
+
+```sh
+python3 d100h_macos.py usb
+python3 d100h_macos.py list-hid
+```
+
+`list-hid` prints one JSON record per interface, including vendor/product IDs,
+usage page, and an exact `path_hex` selection value. It does not send commands.
+
+For Bluetooth, pair in macOS settings, quit Ulanzi Studio, unplug USB from the
+computer, and allow Bluetooth access for Terminal or your IDE when prompted.
+The helper can automatically discover a single advertised dial:
+
+```sh
+python3 d100h_macos.py ble
+```
+
+If discovery finds zero or multiple candidates, put the dial into pairing mode
+and select its UUID explicitly:
+
+```sh
+python3 d100h_macos.py scan
+python3 d100h_macos.py ble YOUR-DEVICE-UUID
+python3 d100h_macos.py ble YOUR-DEVICE-UUID --map mappings.macos.example.json
+```
+
+macOS uses a Bluetooth UUID, not the controller's Bluetooth MAC address. The
+macOS mapping example opens Calculator/Music and controls system volume using
+`open` and `osascript`. Edit it to assign other actions. Run without `--map`
+to only print events. Bluetooth permission can be changed in **System Settings →
+Privacy & Security → Bluetooth**.
+
+The helper also offers experimental HIDAPI access for the wired model. After
+confirming the vendor interface and its report descriptor, use:
+
+```sh
+# Example report values only; verify for your hardware first.
+python3 d100h_macos.py hid --path PATH_HEX_FROM_LIST_HID --report-id 0xfb --size 64
+```
+
+Only vendor usage pages `0xFFFC` and `0xFFFE` are accepted. Enumeration does not
+supply a report size; obtain that from the descriptor or a capture before writing.
+This transport and the macOS helper have been tested with mocked I/O on Linux,
+not on a live Mac/D100H. The helper does not automatically reconnect.
 
 ## Map controls to commands
 
@@ -140,7 +196,7 @@ This is a codec and integration guide, not a complete firmware project.
 ## Tests
 
 ```sh
-python3 -m unittest -v test_protocol.py
+python3 -m unittest discover -v
 ```
 
 The downloaded installer, extracted application, temporary tools, and third-party
