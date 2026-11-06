@@ -1,0 +1,35 @@
+{
+  "source": "Live validation on M5Stack Tab5, reported 2026-11-06",
+  "board": "M5Stack Tab5 (ESP32-P4 + ESP32-C6)",
+  "framework": "ESP-IDF 5.4.2",
+  "ble_host": "NimBLE over ESP-Hosted 2.13.1 (VHCI)",
+  "ble": {
+    "service_uuid": "00001971-0000-1000-8000-00805f9b34fb",
+    "write_uuid": "0000fd01-0000-1000-8000-00805f9b34fb",
+    "notify_uuid": "0000fd00-0000-1000-8000-00805f9b34fb",
+    "value_bytes": 20,
+    "heartbeat_hex": "24569ef228e145a13890c499a360aaad00000000",
+    "event_prefix": "8b10IDSTATE",
+    "duplicate_channel": "HID report 0xFB (handle 69) carried the same 20-byte frame as FD00 (handle 77); FD00 was used as the canonical event channel",
+    "events_processed": 520,
+    "acl_alloc_failures": 0,
+    "disconnects": 0
+  },
+  "wired_usb": {
+    "transport": "ESP32-P4 USB Host HID",
+    "vendor_usage_page": 65534,
+    "report_id": 0,
+    "input_payload_bytes": 64,
+    "output_payload_bytes": 64,
+    "heartbeat_hex": "24569ef228e145a13890c499a360aaad3890c499a360aaad3890c499a360aaad3890c499a360aaad3890c499a360aaad3890c499a360aaad3890c499a360aaad",
+    "event_ids_mapped": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+    "observed_event_ids": null,
+    "decoder_note": "Decrypt all 64 bytes and validate only the first eight-byte event block; later blocks can be non-zero on knob clicks. A 65-byte value with a leading zero is also accepted."
+  },
+  "firmware_version": null,
+  "limitations": [
+    "Only the tested unit and firmware were observed; other revisions may differ.",
+    "Wired validation used an ESP32 USB Host HID implementation, not the macOS HIDAPI path.",
+    "The D100H firmware version was not recorded."
+  ]
+}

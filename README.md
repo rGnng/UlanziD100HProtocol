@@ -16,8 +16,13 @@ package checksum, binary offsets, sources, and limitations.
 - C++11 decoder compiled and checked against captured packets on a Linux host.
 - **macOS wired USB confirmed by a user on D100H `FFF1:00DE`**, including
   button events, knob clicks, free/held rotation, and example command mappings.
-- Linux USB, this project's BLE listener, ESP32 integration, and sleep-timer
-  operations have not received live validation in this project.
+- **ESP32 live validation completed** on an ESP32-P4 host (M5Stack Tab5,
+  ESP-IDF 5.4.2, NimBLE over ESP-Hosted): both the `0x1971`/`FD00` BLE vendor
+  channel and the wired `0xFFFE` USB HID interface decode button/knob events.
+  See [ESP32 integration](esp32/INTEGRATION.txt) for the NimBLE GATT-server
+  requirement and wired framing notes.
+- Linux USB, this project's BLE listener, and sleep-timer operations have not
+  received live validation in this project.
 - BLE mappings were captured by the referenced project on firmware **1.3.8.1**.
   Verify them on other revisions.
 - Confirmed wired framing: vendor page `0xFFFE`, **report ID `0`**, **64-byte
@@ -281,6 +286,11 @@ The encrypted BLE heartbeat is:
 Decrypted control messages start `8b 10 ID STATE`, where `01` means down/step and
 `00` means up. Discover characteristics by UUID rather than hard-coded ATT handles.
 
+On the tested ESP32 unit, HID report `0xFB` delivered the same 20-byte vendor
+frame as `FD00`. A client subscribed to both channels sees every event twice;
+prefer `FD00` and ignore or de-duplicate `0xFB`. The 64-byte HID `0xFB` framing
+documented by `ftl/hamdial` was not observed on this unit.
+
 ## Experimental Linux HID transport
 
 Inspect the controller's identity and report descriptor without sending commands:
@@ -311,7 +321,10 @@ send the heartbeat every second, and feed notifications into the decoder:
 - [Portable C++ header](esp32/d100h_protocol.h)
 - [Integration instructions and dispatch sketch](esp32/INTEGRATION.txt)
 
-This is a codec and integration guide, not a complete firmware project.
+The BLE path is live-validated on ESP32-P4 + ESP32-C6 with ESP-IDF 5.4.2
+(NimBLE over ESP-Hosted). The header also includes BLE encode and 64-byte wired
+USB decode helpers. This is a codec and integration guide, not a complete
+firmware project.
 
 ## Tests
 

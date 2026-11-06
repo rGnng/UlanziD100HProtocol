@@ -5,6 +5,29 @@ The ESP32 is the BLE CENTRAL / GATT CLIENT. It is not a BLE keyboard peripheral.
 No USB host hardware is needed for this route. Unplug USB from a computer while
 trying BLE on the dual-mode model, since Ulanzi says wired takes priority.
 
+LIVE-VALIDATED ESP32 NOTES (ESP-IDF 5.4.2, NimBLE, ESP32-P4 + ESP32-C6)
+
+This route was validated on hardware. The main ESP-IDF trap is that a
+central-only NimBLE build silently discards incoming notifications. Enable both
+of these options, even though this device is only a GATT client:
+
+  CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=y
+  CONFIG_BT_NIMBLE_GATT_SERVER=y
+
+NimBLE compiles the ATT Notification/Indication opcodes out of its receive
+dispatch table when MYNEWT_VAL(BLE_GATTS)=0. The packets still arrive at the
+controller and HCI ACL layer, but BLE_GAP_EVENT_NOTIFY_RX never fires. The
+device does not need to advertise or accept connections; the GATT-server code
+only needs to be linked in.
+
+Send the heartbeat from the NimBLE host task (for example with a
+ble_npl_callout) and keep notification callbacks short. On ESP-Hosted,
+blocking per-report logging can starve the host task and exhaust the ACL pool.
+
+On the tested unit, HID report 0xFB (handle 69) mirrored the same 20-byte vendor
+frame as FD00 (handle 77). Subscribe to FD00 and ignore 0xFB, or de-duplicate,
+so one key press produces one action.
+
 Start with Espressif's GATT client example:
 https://github.com/espressif/esp-idf/tree/master/examples/bluetooth/bluedroid/ble/gatt_client
 
@@ -51,9 +74,10 @@ measure how long the knob was physically held. Turning while pressed uses 0b/0c;
 physical side/top buttons still have their own independent transitions.
 
 This is integration guidance and a tested portable codec, not a complete flashed
-firmware project. ESP32 pairing and BLE operation still need live validation.
+firmware project. BLE operation has been validated on ESP32-P4 + ESP32-C6;
+other ESP32 variants and Bluedroid still need live validation.
 
-Wired USB alternative (not implemented in the ESP32 example)
+Wired USB alternative (also validated on ESP32-P4)
 
 A user confirmed wired D100H FFF1:00DE on macOS: vendor usage page FFFE,
 usage 1, unnumbered 64-byte Input and Output reports. The read-only probe was
@@ -66,8 +90,13 @@ stack, and proper 5V VBUS power. Select the vendor interface, send a full encryp
 report ID; the leading zero required by desktop HIDAPI is an API convention.
 The supplied d100h::heartbeat is the BLE-specific 20-byte value. Do not zero-pad
 its ciphertext for USB: pad the heartbeat plaintext to 64 bytes, then encrypt all
-eight blocks. The decode function also expects BLE's 20-byte framing; adapt it
-to decrypt the complete 64-byte USB message before parsing its event prefix.
-Do not pass only the first 20 encrypted USB bytes into the BLE decoder, which
-leaves its last four bytes unchanged. No ESP32 USB host firmware is supplied or
-validated by the macOS confirmation.
+eight blocks. d100h::decode_usb() accepts the 64-byte report, or 65 bytes with
+the HIDAPI-style leading zero, and decrypts all eight blocks. Only the first
+block's padding is validated: the remaining blocks can contain non-zero data on
+knob clicks. Do not pass only the first 20 encrypted USB bytes into the BLE
+decoder, which leaves its last four bytes unchanged.
+
+The wired path was also validated on an ESP32-P4 USB Host HID implementation
+(usage page 0xFFFE, unnumbered 64-byte reports). No complete ESP32 USB host
+firmware is supplied here; that is a transport result, not a ready-to-flash
+project.

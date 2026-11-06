@@ -116,8 +116,9 @@ experimental; it encrypts the whole selected payload as the supplied driver does
 The ESP32 deliverable is a codec/integration guide, not complete board firmware.
 For USB on ESP32, use a USB host-capable chip/board (e.g. S3), host stack, and a
 proper 5V VBUS supply. The user has since provided the wired descriptor and
-decoded event logs; an ESP32 host implementation remains untested.
-The BLE route avoids these USB-specific hardware and framing requirements.
+decoded event logs, and an ESP32 host implementation has been validated; see
+section 6. The BLE route avoids these USB-specific hardware and framing
+requirements.
 
 
 5. User-confirmed wired USB on macOS
@@ -156,15 +157,42 @@ Observed IDs in the supplied log:
 Top-left (01) and top-right (03) were not included in that event log. The user
 subsequently reported mapped actions working without supplying a per-action log.
 Sleep read/write, actual idle timing, and setting persistence were not verified
-by this wired test. Linux USB and ESP32 transports still need live testing.
+by this wired test. Linux USB still needs live testing; ESP32 validation is in
+section 6.
 
 The descriptor and evidence summary are saved in:
   ../tests/fixtures/d100h_wired_usb.json
 Registry IDs and path_hex values depend on the connection session; always
 select the current FFFE vendor interface after reconnecting.
 
-Updated software verification: 15 Python tests, including an unnumbered 64-byte
-HID regression test assembled from independent ciphertext blocks (not represented
-as a captured raw USB report). Numbered HID and sleep acknowledgment tests remain.
-The supplied C++ decoder handles BLE's 20-byte framing; it must be adapted for
-64-byte USB framing before use in a USB host implementation.
+Updated software verification: 16 Python tests, including a compiled C++ header
+test and an unnumbered 64-byte HID regression test assembled from independent
+ciphertext blocks (not represented as a captured raw USB report). Numbered HID
+and sleep acknowledgment tests remain. The supplied C++ decoder handles BLE's
+20-byte framing; d100h::decode_usb() handles the 64-byte wired framing.
+
+6. ESP32 live validation (2026-11-06)
+
+Both transports were validated on an ESP32-P4 host (M5Stack Tab5) with
+ESP-IDF 5.4.2 and NimBLE over ESP-Hosted 2.13.1:
+
+  BLE: service 1971, FD00 notifications, FD01 writes, 20-byte TEA heartbeat
+  once per second. 520 events decoded, zero ACL allocation failures, zero
+  disconnects.
+  The same 20-byte event frame also arrived on HID report 0xFB (handle 69);
+  FD00 was treated as canonical to avoid duplicate actions. This unit did not
+  use the 64-byte HID 0xFB framing described by ftl/hamdial.
+  Wired USB: ESP32 USB Host HID, vendor usage page FFFE, report ID 0,
+  64-byte input/output reports. The full 64-byte plaintext heartbeat is
+  encrypted as eight TEA blocks. The wired decoder decrypts all 64 bytes and
+  validates only the first eight-byte event block because later blocks can be
+  non-zero on knob clicks.
+
+NimBLE integration caveat: a central-only build with BLE_GATTS disabled
+compiles the ATT Notification/Indication opcodes out of the receive dispatch
+table. Notifications are then silently dropped before BLE_GAP_EVENT_NOTIFY_RX.
+Enable CONFIG_BT_NIMBLE_ROLE_PERIPHERAL and CONFIG_BT_NIMBLE_GATT_SERVER even
+though the host only acts as a GATT client.
+
+The D100H firmware version of this unit was not recorded. Evidence summary:
+  ../tests/fixtures/d100h_esp32_validation.json
