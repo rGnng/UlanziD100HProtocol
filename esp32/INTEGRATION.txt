@@ -1,0 +1,54 @@
+D100H on ESP32 via BLE
+
+Use a BLE-capable ESP32 (original ESP32, C3, S3, etc.). S2 has no Bluetooth.
+The ESP32 is the BLE CENTRAL / GATT CLIENT. It is not a BLE keyboard peripheral.
+No USB host hardware is needed for this route. Unplug USB from a computer while
+trying BLE on the dual-mode model, since Ulanzi says wired takes priority.
+
+Start with Espressif's GATT client example:
+https://github.com/espressif/esp-idf/tree/master/examples/bluetooth/bluedroid/ble/gatt_client
+
+1. Put the D100H into pairing mode on a Bluetooth slot, scan and connect.
+   Pair/bond if its security requires it; store bonds for reconnection.
+   Discover services rather than relying on captured ATT handle numbers.
+2. Find service d100h::service_uuid and write/notify characteristics from header.
+3. Subscribe to notifications on d100h::notify_uuid (CCCD 0x2902 = 01 00).
+4. Send the 20-byte d100h::heartbeat to d100h::write_uuid WITHOUT response
+   immediately, and schedule it every 1000 ms while connected.
+5. Call d100h::decode(data, length, event) on each vendor notification.
+6. Dispatch each event to application logic (GPIO, MQTT, MIDI, etc.).
+   Maintain a set of physical held buttons for button+rotation combinations.
+   Clear held state and stop heartbeats on disconnect, then reconnect/re-subscribe.
+
+With ESP-IDF Bluedroid use esp_ble_gattc_write_char(..., 20,
+heartbeat, ESP_GATT_WRITE_TYPE_NO_RSP, ...), copying the const heartbeat if the
+API requires a mutable pointer. Register for notify and enable its CCCD.
+Do not perform slow application work inside a BLE callback; queue decoded events.
+
+Application dispatch sketch (include d100h_protocol.h):
+
+  d100h::Event event;
+  if (d100h::decode(data, length, event)) {
+      switch (event.id) {
+      case 0x01: /* top-left, event.down is press/release */ break;
+      case 0x02: /* top-middle */ break;
+      case 0x03: /* top-right */ break;
+      case 0x04: /* upper-left side */ break;
+      case 0x05: /* upper-right side */ break;
+      case 0x06: /* lower-left side */ break;
+      case 0x07: if (event.down) { /* one knob click */ } break;
+      case 0x08: /* lower-right side */ break;
+      case 0x09: /* counterclockwise step */ break;
+      case 0x0a: /* clockwise step */ break;
+      case 0x0b: /* counterclockwise with knob held */ break;
+      case 0x0c: /* clockwise with knob held */ break;
+      }
+  }
+
+Knob click is a synthetic down/up pair delivered on physical release in the
+captured firmware. Ignore its synthetic up for one-shot actions. Its timing cannot
+measure how long the knob was physically held. Turning while pressed uses 0b/0c;
+physical side/top buttons still have their own independent transitions.
+
+This is integration guidance and a tested portable codec, not a complete flashed
+firmware project. Fresh pairing and the dual-mode revision still need validation.

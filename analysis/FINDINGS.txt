@@ -1,0 +1,118 @@
+Ulanzi Studio 3.4.8 / D100H analysis — 2026-11-06
+
+Package downloaded and unpacked without running its installer or application:
+https://cdn.ulanzistudio.com/UlanziDeck/3.4.8/Mac_Apple_Ulanzi_Studio_V3.4.8_20261027.pkg
+Size: 280720694 bytes
+SHA256: 482f482725b5accbae89c007ce555af4f54a3b28b033627ce52f29c023e6d21c
+Workspace initially empty. No physical D100H/hidraw device available here.
+
+1. Findings from the actual supplied binary
+
+The main UlanziDeck executable is a Qt application. The D100H family protocol is
+implemented in Contents/Frameworks/Ulanzi_Studio.dylib, an ARM64 Mach-O Objective-C
+library from KEHWIN (source paths identify KehwinMouseLibV2/KehwinAudioMouseLib).
+This is an application-level userspace protocol library, not a portable kernel driver.
+libUlanziFZBle.dylib is a separate Bluetooth library; its FFFx UUID strings should
+not be mistaken for the observed D100H 1971/FDxx vendor channel.
+
+Offsets below are Mach-O virtual addresses and happen also to be file offsets
+for the relevant segments in this exact library:
+
+  _gaui_custom_encrypt_keys  0x4e748
+    ca ba a5 ca 6d 8a 2a bc ba 9e 5a ca ca 8b b8 9b
+  _encode                   0x2a6d8
+  _decode                   0x2a73c
+    Original TEA, 32 rounds, uint32 little-endian, delta 0x9e3779b9.
+  _decrypt_data             0x2a7a0
+  _encrypt_data             0x2a7f8
+    Process floor(length/8) independent 8-byte blocks; preserve trailing bytes.
+  +[MessageHelper encodeMessage:] 0x1f0a8
+  +[MessageHelper decodeMessage:] 0x1f154
+    Invoke the above cipher using the fixed key.
+  +[MessageHelper deviceHeartbeatMessage] 0x234dc
+    Builds a 64-byte plaintext buffer: 06 01 23 00 01, then zero padding.
+  -[HidDevice init:]         0x29d70
+    Reads MaxOutputReportSize, MaxInputReportSize and ReportDescriptor.
+    Scans for descriptor byte 85 (Report ID item) and uses following ID.
+  -[HidDevice sendData:value:] 0x2a398
+    Encrypts on usage pages FFFC/FFFE; prepends report ID when present;
+    copies to descriptor-derived output buffer; sends IOHIDDeviceSetReport.
+  _InputReportCallback      0x2a114
+    Strips report ID if present, decrypts on FFFC/FFFE, then parses payload.
+  +[DeviceList ulanziHidDevices] 0x16a30
+    Returns six HID match dictionaries (NOT a per-product identification list):
+      VID FFF1 / PID 0082 / usage page FFFC
+      VID FFF1 / PID 00DE / usage page FFFE
+      VID FFF1 / PID 00DD / usage page FFFC
+      VID 05AC / PID 0267 / usage page FFFC
+      VID FFF1 / PID 00D2 / usage page FFFE
+      VID FFF1 / PID 00E9 / usage page FFFE
+    These prove library support only. Do not assign one to the user's wired
+    D100H revision without inspecting the physical unit.
+
+Disassembly and short strings are saved alongside this file. disassemble.py
+requires macholib and capstone (installed in analysis/venv). It uses symbols in the
+original package; binary code was not executed.
+
+2. External primary evidence and what it establishes
+
+Ulanzi currently advertises a Dual-Mode Version (Wired + Bluetooth), with wired
+priority. Older reports that all D100H USB ports are charge-only do not cover it:
+https://www.ulanzi.com/products/d100h-dial-creative-controller-i003
+
+Independent BLE captures from firmware 1.3.8.1 identify all controls and confirm
+online events with only subscription + immediate/periodic heartbeat:
+https://github.com/kriomant/ulanzi-d100h/blob/main/PROTOCOL.md
+Local reference commit: 69fec60bf878a7f83447e2ea8a89e8b2b3a05fc6
+Service: 00001971-0000-1000-8000-00805f9b34fb
+Write without response: 0000fd01-0000-1000-8000-00805f9b34fb
+Notify: 0000fd00-0000-1000-8000-00805f9b34fb
+BLE values are 20 bytes. Subscribe, then send heartbeat every 1000 ms.
+Encrypted heartbeat:
+  24569ef228e145a13890c499a360aaad00000000
+On the tested firmware online mode suppresses factory keyboard/media actions;
+standalone behavior resumes about three seconds after heartbeat stops.
+The capture project's USB transport was not tested.
+
+Independent Linux HID-over-Bluetooth implementation:
+https://github.com/ftl/hamdial/blob/master/doc/protocol.md
+Local reference commit: eaf5b13247e21de88502eff4521141b9f6976263
+Uses /dev/hidrawN, report FB, 64-byte payload, VID FFF1 PID 0082, bus 0005.
+This is a Bluetooth HID identity, not proof of the wired revision's USB identity.
+The independently captured first eight ciphertext bytes match the TEA event map.
+
+3. Control IDs after decryption
+
+The observed event prefix is 8B 10 ID STATE. Physical button state is 01 down,
+00 up. Positions are viewed with the Ulanzi logo upright:
+  01 top-left; 02 top-middle; 03 top-right
+  04 upper-left side; 05 upper-right side
+  06 lower-left side; 08 lower-right side
+  07 knob click (synthetic down/up emitted on physical release)
+  09 free counterclockwise; 0A free clockwise
+  0B knob-held counterclockwise; 0C knob-held clockwise
+Rotation events have state 01, one per reported step, no absolute angle/count.
+Keep a pressed-button set to support side-button + rotation combinations.
+Do not infer physical knob hold duration from ID 07; held rotation uses 0B/0C.
+These mappings are capture-backed for the tested BLE firmware and need a quick
+physical check on the user's newer wired hardware/firmware revision.
+
+4. Delivered implementation and checks
+
+../d100h.py: standalone Python TEA codec, BLE listener using bleak, Linux hidraw
+probe/listener, JSON command dispatch. No configured commands run by default.
+../mappings.example.json: optional playerctl/wpctl action mapping.
+../esp32/d100h_protocol.h: portable C++ decoder plus encrypted BLE heartbeat.
+../esp32/INTEGRATION.txt: BLE GATT client setup and application callback guidance.
+../test_protocol.py: captured plaintext/ciphertext fixtures, independent HID
+ciphertext prefixes, modifier state and one-shot knob-click handling.
+
+Validation: three Python tests passed; C++11 decoder compiled with
+-Wall -Wextra -Werror and decoded captured event/heartbeat vectors successfully.
+CLI help and empty-device enumeration passed. No live USB/BLE or ESP32 testing.
+The Linux HID transport requires the actual report ID and payload size. It is
+experimental; it encrypts the whole selected payload as the supplied driver does.
+The ESP32 deliverable is a codec/integration guide, not complete board firmware.
+For USB on ESP32, use a USB host-capable chip/board (e.g. S3), host stack, and a
+proper 5V VBUS supply; descriptors and actual wired reports must first be captured.
+The BLE route avoids these USB-specific hardware and framing requirements.

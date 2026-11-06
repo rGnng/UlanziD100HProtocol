@@ -1,0 +1,8 @@
+{
+  "top_left.down": ["playerctl", "previous"],
+  "top_middle.down": ["playerctl", "play-pause"],
+  "top_right.down": ["playerctl", "next"],
+  "knob.click": ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
+  "rotate.cw": ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "1%+"],
+  "rotate.ccw": ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", "1%-"]
+}
