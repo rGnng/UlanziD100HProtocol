@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
 import d100h_macos as mac
-from d100h import Dispatcher
+from d100h import Dispatcher, crypt
 
 
 class MacTests(unittest.TestCase):
@@ -42,7 +42,8 @@ class MacTests(unittest.TestCase):
         dev = Mock()
         # Captured top-left down, with numbered HID report prefix.
         wire = bytes.fromhex('fb8e8f5e16ec67281e3890c499a360aaad00000000')
-        dev.read.side_effect = [list(wire), KeyboardInterrupt()]
+        reply = b'\xfb' + crypt(bytes.fromhex('01014212201c').ljust(64, b'\0'), True)
+        dev.read.side_effect = [list(reply), list(wire), KeyboardInterrupt()]
         dev.write.side_effect = lambda packet: len(packet)
         hid = SimpleNamespace(enumerate=lambda: [info], device=lambda: dev)
         out = io.StringIO()
@@ -50,12 +51,15 @@ class MacTests(unittest.TestCase):
         with patch.dict('sys.modules', {'hid': hid}), contextlib.redirect_stdout(out):
             mac.list_hid()
             with self.assertRaises(KeyboardInterrupt):
-                mac.run_hid(argparse.Namespace(path=path.hex(), report_id=0xfb, size=64), dispatch)
+                mac.run_hid(argparse.Namespace(path=path.hex(), report_id=0xfb, size=64, sleep=7200), dispatch)
         records = [json.loads(line) for line in out.getvalue().splitlines()]
         self.assertEqual(records[0]['path_hex'], path.hex())
-        self.assertEqual(records[1]['event'], 'top_left.down')
-        self.assertEqual(dev.write.call_args.args[0][:9].hex(), 'fb24569ef228e145a1')
+        self.assertEqual(records[1]['sleep_timer_seconds'], 7200)
+        self.assertEqual(records[2]['event'], 'top_left.down')
+        self.assertEqual(dev.write.call_args_list[0].args[0][:9].hex(), 'fb24569ef228e145a1')
         self.assertEqual(len(dev.write.call_args.args[0]), 65)
+        self.assertEqual(crypt(dev.write.call_args.args[0][1:])[:6].hex(), '01014202201c')
+        self.assertIsNone(dispatch.pending_sleep)
         dev.open_path.assert_called_once_with(path)
         dev.close.assert_called_once()
         self.assertFalse(dispatch.held)

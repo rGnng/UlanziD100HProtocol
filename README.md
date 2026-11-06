@@ -141,6 +141,51 @@ Knob clicks are synthetic down/up pairs delivered on physical release in the
 captured firmware. The listener emits one `knob.click`. These events cannot
 measure physical knob hold duration. Held rotation has separate IDs.
 
+## Change the sleep timer
+
+Both listeners accept `--sleep SECONDS` (or `--sleep off`) and `--read-sleep`.
+The command runs once after connecting; the script then keeps listening for
+button/knob events. Press Ctrl-C to disconnect after the timer reply appears.
+
+On macOS, omit the UUID for automatic discovery or supply it after `ble`:
+
+```sh
+# Read the configured timer.
+python3 d100h_macos.py ble --read-sleep
+# Set two hours (7200 seconds).
+python3 d100h_macos.py ble --sleep 7200
+# Disable automatic sleep.
+python3 d100h_macos.py ble --sleep off
+```
+
+On Linux:
+
+```sh
+python3 d100h.py ble AA:BB:CC:DD:EE:FF --read-sleep
+python3 d100h.py ble AA:BB:CC:DD:EE:FF --sleep 7200
+```
+
+The same flags work with each script's experimental `hid` mode; keep its required
+path, report ID and payload size arguments. They can also be combined with `--map`.
+Quit Ulanzi Studio before changing the device settings.
+
+Values are whole seconds from **0 to 65535**. `0`/`off` disables the timer; Studio's
+observed presets are `3600`, `7200`, `10800`, and `14400` (one to four hours).
+Other durations may be accepted, but their actual sleep timing is unverified.
+
+A reply prints, for example:
+
+```json
+{"sleep_timer_seconds": 7200, "disabled": false, "write_response": true}
+```
+
+`write_response: true` is the device's setting acknowledgment; a read response
+has `false`. A missing acknowledgment after five seconds or a reply with a
+different value is reported as an error. A successful write alone is not treated
+as confirmation. Settings retention after a power cycle was independently observed
+on firmware 1.3.8.1; this implementation has not been tested against live hardware.
+The accepted duration does not establish the exact conditions for entering sleep.
+
 ## BLE framing
 
 | Role | UUID |

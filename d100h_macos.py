@@ -19,7 +19,7 @@ import subprocess
 import sys
 import time
 
-from d100h import Dispatcher, SERVICE, heartbeat, run_ble
+from d100h import Dispatcher, SERVICE, add_sleep_options, heartbeat, run_ble
 
 
 def load_mapping(path):
@@ -86,13 +86,20 @@ def run_hid(args, dispatch):
     device = hid.device()
     try:
         device.open_path(path)
+        setting = dispatch.sleep_command(args, args.size)
         next_beat = 0
         while True:
+            dispatch.check_sleep_reply()
             now = time.monotonic()
             if now >= next_beat:
                 packet = bytes([args.report_id]) + heartbeat(args.size)
                 if device.write(packet) != len(packet):
                     raise OSError('Short HID write; verify report ID and payload size')
+                if setting is not None:
+                    packet = bytes([args.report_id]) + setting
+                    if device.write(packet) != len(packet):
+                        raise OSError('Short sleep timer write; setting is unconfirmed')
+                    setting = None
                 next_beat = now + 1
             raw = bytes(device.read(4096, 100))
             if not raw:
@@ -123,6 +130,7 @@ def build_parser():
     wired.add_argument('--size', required=True, type=int, help='Payload size excluding report ID')
     for item in (ble, wired):
         item.add_argument('--map', type=Path, help='Optional JSON command mapping')
+        add_sleep_options(item)
     return parser
 
 

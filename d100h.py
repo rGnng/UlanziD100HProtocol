@@ -57,20 +57,77 @@ def heartbeat(size=20):
     return crypt(bytes.fromhex('0601230001').ljust(size, b'\0'), True)
 
 
+def sleep_seconds(value):
+    """CLI duration: seconds, with 'off' as an alias for zero."""
+    try:
+        seconds = 0 if value.lower() == 'off' else int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError('Use seconds from 0 to 65535, or off')
+    if not 0 <= seconds <= 65535:
+        raise argparse.ArgumentTypeError('Sleep seconds must be 0..65535')
+    return seconds
+
+
+def add_sleep_options(parser):
+    options = parser.add_mutually_exclusive_group()
+    options.add_argument('--sleep', type=sleep_seconds, metavar='SECONDS|off',
+                         help='Set device sleep timer on connect; 0/off disables sleep')
+    options.add_argument('--read-sleep', action='store_true',
+                         help='Read device sleep timer on connect')
+
+
+def sleep_packet(seconds=None, size=20):
+    """None reads the timer; an integer writes uint16 little-endian seconds."""
+    if not 20 <= size <= 64:
+        raise ValueError('Vendor payload size must be 20..64')
+    if seconds is not None and (type(seconds) is not int or not 0 <= seconds <= 65535):
+        raise ValueError('Sleep seconds must be an integer from 0 to 65535')
+    prefix = bytes.fromhex('01014201') if seconds is None else bytes.fromhex('01014202') + struct.pack('<H', seconds)
+    return crypt(prefix.ljust(size, b'\0'), True)
+
+
 class Dispatcher:
     def __init__(self, mapping=None):
         self.held = set()
         self.mapping = mapping or {}
         self.children = []
+        self.pending_sleep = None
+        self.sleep_error = None
         for name, argv in self.mapping.items():
             if not isinstance(argv, list) or not argv or not all(isinstance(s, str) for s in argv):
                 raise ValueError(f'{name}: expected a nonempty command argument array')
+
+    def sleep_command(self, args, size=20):
+        seconds = getattr(args, 'sleep', None)
+        if seconds is None and not getattr(args, 'read_sleep', False):
+            return None
+        packet = sleep_packet(seconds, size)
+        self.pending_sleep = (seconds, time.monotonic() + 5)
+        return packet
+
+    def check_sleep_reply(self, disconnected=False):
+        if self.sleep_error:
+            raise RuntimeError(self.sleep_error)
+        if self.pending_sleep and (disconnected or time.monotonic() >= self.pending_sleep[1]):
+            raise RuntimeError('No sleep timer acknowledgment received; setting is unconfirmed')
 
     def receive(self, wire):
         if len(wire) < 20:
             print(json.dumps({'short_packet': wire.hex()}), flush=True)
             return
         p = crypt(wire)
+        if p[:4] in (bytes.fromhex('01014211'), bytes.fromhex('01014212')):
+            seconds = struct.unpack_from('<H', p, 4)[0]
+            write_response = p[3] == 0x12
+            print(json.dumps({'sleep_timer_seconds': seconds, 'disabled': seconds == 0,
+                              'write_response': write_response}), flush=True)
+            if self.pending_sleep:
+                expected, _deadline = self.pending_sleep
+                if write_response == (expected is not None):
+                    if expected is not None and seconds != expected:
+                        self.sleep_error = f'Sleep timer reply returned {seconds}s, requested {expected}s'
+                    self.pending_sleep = None
+            return
         if p[:2] != b'\x8b\x10':
             if p[:4] != bytes.fromhex('06012310'):
                 print(json.dumps({'other_plaintext': p.hex()}), flush=True)
@@ -110,9 +167,15 @@ async def run_ble(args, dispatch):
             raise RuntimeError('Expected D100H vendor channel 1971/FD01/FD00 not found')
         await client.start_notify(NOTIFY, lambda _sender, value: dispatch.receive(bytes(value)))
         try:
+            setting = dispatch.sleep_command(args)
             while client.is_connected:
+                dispatch.check_sleep_reply()
                 await client.write_gatt_char(WRITE, heartbeat(), response=False)
+                if setting is not None:
+                    await client.write_gatt_char(WRITE, setting, response=False)
+                    setting = None
                 await asyncio.sleep(1)
+            dispatch.check_sleep_reply(disconnected=True)
         finally:
             dispatch.held.clear()
             if client.is_connected:
@@ -136,14 +199,21 @@ def run_hid(args, dispatch):
         raise ValueError('Report ID must be 0..255; payload size must be 20..64')
     fd = os.open(args.path, os.O_RDWR | os.O_NONBLOCK)
     try:
+        setting = dispatch.sleep_command(args, args.size)
         next_beat = 0
         while True:
+            dispatch.check_sleep_reply()
             now = time.monotonic()
             if now >= next_beat:
                 # hidraw writes always start with report ID, including zero.
                 packet = bytes([args.report_id]) + heartbeat(args.size)
                 if os.write(fd, packet) != len(packet):
                     raise OSError('Short hidraw write')
+                if setting is not None:
+                    packet = bytes([args.report_id]) + setting
+                    if os.write(fd, packet) != len(packet):
+                        raise OSError('Short sleep timer write; setting is unconfirmed')
+                    setting = None
                 next_beat = now + 1
             ready, _, _ = select.select([fd], [], [], max(0, next_beat - time.monotonic()))
             if ready:
@@ -173,6 +243,7 @@ def main():
     hid.add_argument('--size', type=int, required=True, help='Payload bytes, excluding report ID')
     for item in (ble, hid):
         item.add_argument('--map', type=Path, help='Optional JSON command mapping')
+        add_sleep_options(item)
     args = parser.parse_args()
     if args.mode == 'list-hid':
         list_hid()
@@ -188,6 +259,8 @@ def main():
             run_hid(args, dispatch)
     except KeyboardInterrupt:
         pass
+    except (OSError, RuntimeError, ValueError) as exc:
+        parser.exit(1, f'{exc}\n')
 
 
 if __name__ == '__main__':
