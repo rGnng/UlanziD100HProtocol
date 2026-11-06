@@ -13,6 +13,43 @@ from d100h import Dispatcher, crypt
 
 
 class MacTests(unittest.TestCase):
+    def test_read_only_probe_handles_duplicate_mouse_collections(self):
+        path = b'DevSrvsID:4295142103'
+        info = [{'path': path, 'usage_page': 1, 'usage': usage} for usage in (2, 1)]
+        dev = Mock()
+        dev.get_report_descriptor.return_value = [0x05, 0x01, 0x09, 0x02]
+        dev.read.return_value = [0x01, 0x00, 0x02]
+        hid = SimpleNamespace(enumerate=lambda: info, device=lambda: dev)
+        out = io.StringIO()
+        with patch.dict('sys.modules', {'hid': hid}), \
+             patch.object(mac.time, 'monotonic', side_effect=[0, 0, 0.1, 31]), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            mac.probe_hid(argparse.Namespace(path=path.hex(), seconds=30))
+        records = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(len(records[0]['collections']), 2)
+        self.assertEqual(records[1]['report_descriptor_hex'], '05010902')
+        self.assertEqual(records[2]['raw_hex'], '010002')
+        self.assertEqual(records[3]['reports_received'], 1)
+        dev.write.assert_not_called()
+        dev.send_feature_report.assert_not_called()
+        dev.close.assert_called_once()
+
+    def test_probe_keeps_reading_when_descriptor_unavailable(self):
+        dev = Mock()
+        dev.get_report_descriptor.side_effect = OSError('unsupported')
+        dev.read.return_value = []
+        hid = SimpleNamespace(enumerate=lambda: [{'path': b'path'}], device=lambda: dev)
+        out = io.StringIO()
+        with patch.dict('sys.modules', {'hid': hid}), \
+             patch.object(mac.time, 'monotonic', side_effect=[0, 0, 31]), \
+             contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            mac.probe_hid(argparse.Namespace(path=b'path'.hex(), seconds=30))
+        records = [json.loads(line) for line in out.getvalue().splitlines()]
+        self.assertEqual(records[1]['descriptor_error'], 'unsupported')
+        self.assertEqual(records[-1]['reports_received'], 0)
+        dev.read.assert_called_once()
+        dev.write.assert_not_called()
+
     def test_discover_single_dial_passes_device_object(self):
         device = SimpleNamespace(address='macOS-UUID', name='Ulanzi Dial')
         adv = SimpleNamespace(local_name=None, service_uuids=[])

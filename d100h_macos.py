@@ -4,6 +4,7 @@
 Install: python3 -m pip install -r requirements-macos.txt
 Inspect: python3 d100h_macos.py usb
          python3 d100h_macos.py list-hid
+         python3 d100h_macos.py probe-hid --path PATH_HEX
 Listen:  python3 d100h_macos.py scan
          python3 d100h_macos.py ble [DEVICE-UUID] [--map mappings.macos.example.json]
 
@@ -41,8 +42,47 @@ def list_hid():
             'manufacturer': device.get('manufacturer_string'),
             'product': device.get('product_string'),
             'interface': device.get('interface_number'),
+            'bus_type': device.get('bus_type'),
             'path_hex': path.hex(),
         }), flush=True)
+
+
+def probe_hid(args):
+    """Read descriptor and input reports without vendor writes or heartbeat."""
+    import hid
+    path = bytes.fromhex(args.path)
+    matches = [device for device in hid.enumerate() if device['path'] == path]
+    if not matches:
+        raise ValueError('HID path is no longer present; run list-hid again')
+    device = hid.device()
+    try:
+        device.open_path(path)
+        print(json.dumps({'probe': 'read-only', 'path_hex': path.hex(),
+                          'collections': [{'usage_page': item.get('usage_page'),
+                                           'usage': item.get('usage')} for item in matches]}), flush=True)
+        try:
+            descriptor = bytes(device.get_report_descriptor())
+            print(json.dumps({'report_descriptor_hex': descriptor.hex()}), flush=True)
+        except (AttributeError, OSError, NotImplementedError) as exc:
+            print(json.dumps({'descriptor_error': str(exc),
+                              'hint': 'Try upgrading hidapi, or capture ioreg -r -c IOHIDDevice -l -w 0'}), flush=True)
+        print('Press/release each button, click the knob, and rotate both ways. '
+              'Raw reports retain any report ID. Ctrl-C stops.', file=sys.stderr)
+        started = time.monotonic()
+        count = 0
+        while time.monotonic() - started < args.seconds:
+            raw = bytes(device.read(4096, 100))
+            if raw:
+                count += 1
+                print(json.dumps({'elapsed_seconds': round(time.monotonic() - started, 3),
+                                  'length': len(raw), 'raw_hex': raw.hex()}), flush=True)
+        print(json.dumps({'reports_received': count, 'probe_complete': True}), flush=True)
+        if not count:
+            print('No reports received on this path. This does not establish a hardware fault; '
+                  'another HID collection may carry the controls. Check Input Monitoring '
+                  'permission for your terminal if opening or reading is blocked.', file=sys.stderr)
+    finally:
+        device.close()
 
 
 async def scan(timeout):
@@ -81,8 +121,8 @@ def run_hid(args, dispatch):
         raise ValueError('Report ID must be 0..255; payload size must be 20..64')
     path = bytes.fromhex(args.path)
     matches = [device for device in hid.enumerate() if device['path'] == path]
-    if len(matches) != 1 or matches[0].get('usage_page') not in (0xfffc, 0xfffe):
-        raise ValueError('Select one vendor interface on usage page 0xFFFC/0xFFFE from list-hid')
+    if not any(item.get('usage_page') in (0xfffc, 0xfffe) for item in matches):
+        raise ValueError('Select a vendor interface on usage page 0xFFFC/0xFFFE from list-hid')
     device = hid.device()
     try:
         device.open_path(path)
@@ -119,6 +159,9 @@ def build_parser():
     sub = parser.add_subparsers(dest='mode', required=True)
     sub.add_parser('usb', help='List USB devices using macOS system_profiler')
     sub.add_parser('list-hid', help='List HID interfaces and their path_hex values')
+    probe = sub.add_parser('probe-hid', help='Read-only HID descriptor and raw input test')
+    probe.add_argument('--path', required=True, help='Exact path_hex value from list-hid')
+    probe.add_argument('--seconds', type=float, default=30, help='Capture duration, default 30 seconds')
     scanner = sub.add_parser('scan', help='Print nearby BLE device UUIDs and names')
     scanner.add_argument('--timeout', type=float, default=15)
     ble = sub.add_parser('ble', help='Listen via BLE; omit UUID to discover a single dial')
@@ -147,11 +190,15 @@ def main():
         parser.exit(2, 'This helper targets macOS. On Linux use d100h.py.\n')
     if getattr(args, 'timeout', 15) <= 0:
         parser.error('--timeout must be positive')
+    if getattr(args, 'seconds', 30) <= 0:
+        parser.error('--seconds must be positive')
     try:
         if args.mode == 'usb':
             subprocess.run(['system_profiler', 'SPUSBDataType'], check=True)
         elif args.mode == 'list-hid':
             list_hid()
+        elif args.mode == 'probe-hid':
+            probe_hid(args)
         elif args.mode == 'scan':
             asyncio.run(print_scan(args.timeout))
         else:
@@ -165,7 +212,9 @@ def main():
     except ImportError as exc:
         parser.exit(1, f'{exc}. Install dependencies with: python3 -m pip install -r requirements-macos.txt\n')
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as exc:
-        parser.exit(1, f'{exc}\nFor BLE access, check System Settings > Privacy & Security > Bluetooth.\n')
+        permission = 'Bluetooth' if args.mode in ('scan', 'ble') else 'Input Monitoring'
+        parser.exit(1, f'{exc}\nCheck System Settings > Privacy & Security > {permission} '
+                    'and quit Ulanzi Studio before retrying.\n')
 
 
 if __name__ == '__main__':

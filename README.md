@@ -87,6 +87,28 @@ macOS mapping example opens Calculator/Music and controls system volume using
 to only print events. Bluetooth permission can be changed in **System Settings →
 Privacy & Security → Bluetooth**.
 
+To test the USB HID input without sending vendor commands, connect the cable,
+quit Ulanzi Studio, and choose the current `path_hex` from `list-hid`:
+
+```sh
+python3 d100h_macos.py probe-hid --path YOUR_PATH_HEX --seconds 30
+```
+
+During capture, press and release each button, click the knob, rotate both ways,
+and rotate while holding the knob. The probe prints the report descriptor when
+available and timestamped raw input reports, preserving any report ID. It accepts
+standard mouse/keyboard collections as well as vendor collections, and handles
+multiple collections sharing a path. It sends no heartbeat, output reports, or
+feature writes, so factory actions may still occur. Raw input does not by itself
+provide the vendor-mode control mapping.
+
+A zero-report result does not prove a hardware fault: the selected collection may
+not carry those controls. If access fails, check **Privacy & Security → Input
+Monitoring** for your terminal. For a descriptor error, try upgrading `hidapi` or
+capture `ioreg -r -c IOHIDDevice -l -w 0`. Paths may change after reconnecting the
+USB cable; enumerate again if the path is no longer found. Share the descriptor
+and raw reports to determine the vendor report ID and size for your revision.
+
 The helper also offers experimental HIDAPI access for the wired model. After
 confirming the vendor interface and its report descriptor, use:
 
